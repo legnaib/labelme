@@ -71,6 +71,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Whether we need to save or not.
         self.dirty = False
 
+        # Whether a change of keep annotations occured.
+        self.keep_change = False
+
         self._noSelectionSlot = False
 
         # Main widgets and related state.
@@ -936,6 +939,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         shape.label = text
         shape.flags = flags
+
         item.setText(text)
         self.setDirty()
         if not self.uniqLabelList.findItems(text, Qt.MatchExactly):
@@ -989,48 +993,11 @@ class MainWindow(QtWidgets.QMainWindow):
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
 
-        next_item = QtWidgets.QListWidgetItem(shape.label)
-        next_item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-        next_item.setCheckState(Qt.Unchecked)
-
         # if the shape already exists exactly -> don't update
         # if the same label but a different shape already exist, replace them!
-        same_shape_exists = False
-        if len(self.keepLabelList.itemsToShapes) > 0:
-            (allItems, allShapes) = zip(*self.keepLabelList.itemsToShapes)
-            for i in range(len(allShapes)):
-                old_shape = allShapes[i]
-                if old_shape.label == shape.label:
-                    # old and new shape have the same label
-                    same_shape_exists = True
-                    if old_shape.points != shape.points:
-                        if allItems[i].checkState() == Qt.Unchecked:# and allItems[i].checkState() == Qt.Unchecked:
-                            self.keepLabelList.itemsToShapes[i] = (allItems[i], shape)
-                            
-                            # add shape correctly
-                            self.labelList.itemsToShapes.append((item, shape))
-                            self.labelList.addItem(item)
-                        else:
-                            # don't add any shape to labelList, only change labels
-                            self.remShapes([old_shape])
-                        print('points are not the same', shape.label)
-                        print('old_shape:', len(old_shape.points), 'new:', len(shape.points))
-                    else:
-                        self.labelList.itemsToShapes.append((item, shape))
-                        self.labelList.addItem(item)
-                        #new_item_shapes = (allItems[i], shape)
-                        #self.keepLabelList.itemsToShapes[i] = new_item_shapes
-            
-        if not same_shape_exists or len(self.keepLabelList.itemsToShapes) == 0:
-            # add items only if they are not there before
-            self.setDirty()
-            print('appended ', next_item.text())
-            
-            self.labelList.itemsToShapes.append((item, shape))
-            self.labelList.addItem(item)
+        self.labelList.itemsToShapes.append((item, shape))
+        self.labelList.addItem(item)
 
-            self.keepLabelList.itemsToShapes.append((next_item, shape))
-            self.keepLabelList.addItem(next_item)
         if not self.uniqLabelList.findItems(shape.label, Qt.MatchExactly):
             self.uniqLabelList.addItem(shape.label)
             self.uniqLabelList.sortItems()
@@ -1038,25 +1005,105 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in self.actions.onShapesPresent:
             action.setEnabled(True)
 
+    # UNUSED!
+    def findNearestShape(self, shape, same_labels):
+        # find nearest shape which will correspond to the same object
+        (allItems, allShapes) = zip(*self.keepLabelList.itemsToShapes)
+        orig_rect = shape.boundingRect()
+        for index in same_labels:
+            new_rect = allShapes[index].boundingRect()
+            intersect = orig_rect & new_rect
+            area = intersect.width() * intersect.height()
+            print('Rects: ', orig_rect, new_rect, area)
+
+    def addKeepLabels(self):
+        # arrange keepLabelList correctly with the corresponding shapes
+        (allOrigItems, allOrigShapes) = zip(*self.labelList.itemsToShapes)
+        for j in range(len(allOrigShapes)):
+            shape = allOrigShapes[j]
+            next_item = QtWidgets.QListWidgetItem(shape.label)
+            next_item.setFlags(next_item.flags() | Qt.ItemIsUserCheckable)
+            next_item.setCheckState(Qt.Unchecked)
+
+            if len(self.keepLabelList.itemsToShapes) == 0:
+                self.keepLabelList.itemsToShapes.append((next_item, shape))
+                self.keepLabelList.addItem(next_item)
+                continue
+            (allItems, allShapes) = zip(*self.keepLabelList.itemsToShapes)
+            same_labels = []
+            same_points = None
+            for i in range(len(allShapes)):
+                old_shape = allShapes[i]
+                if old_shape.label == shape.label:
+                    same_labels.append(i)
+            if same_labels == []:
+                # No corresponding item exists
+                self.keepLabelList.itemsToShapes.append((next_item, shape))
+                self.keepLabelList.addItem(next_item)
+            elif same_points == None:
+                # No corresponding shape exists (but the item)
+                #self.findNearestShape(shape, same_labels)
+                self.keepLabelList.itemsToShapes.append((next_item, shape))
+                self.keepLabelList.addItem(next_item)
+            else:
+                # Corresponding shape and item exists
+                pass
+
+        remove_items = []
+        len_diff = len(self.keepLabelList.itemsToShapes)-len(self.labelList.itemsToShapes)
+
+        for i in range(len_diff):
+            # handle all previous shapes
+            new_item, new_shape = self.keepLabelList.itemsToShapes[i]
+            if new_item.checkState() == Qt.Unchecked:
+                remove_items.append((new_item, new_shape))
+            else:
+                # insert to correct position
+                next_item = QtWidgets.QListWidgetItem(new_item.text())
+                next_item.setFlags(next_item.flags() | Qt.ItemIsUserCheckable)
+                next_item.setCheckState(Qt.Checked)
+                self.keepLabelList.itemsToShapes.insert(i+len_diff, (next_item, new_shape))
+                self.keepLabelList.insertItem(i+len_diff, next_item)
+
+                # add to labelList
+                # before doing this: check if the item already exist in labelList:
+                orig_shape = self.labelList.search_for_shape(new_shape)
+
+                if orig_shape == None:
+                    self.keep_change = True
+                    print('inserted something')
+                    next_item = QtWidgets.QListWidgetItem(new_shape.label)
+                    next_item.setFlags(next_item.flags() | Qt.ItemIsUserCheckable)
+                    next_item.setCheckState(Qt.Checked)
+                    self.labelList.itemsToShapes[i] = (next_item, new_shape)
+                    self.labelList.takeItem(i)
+                    self.labelList.insertItem(i, next_item)
+                    #self.labelList.itemsToShapes.insert(i+len_diff, (next_item, new_shape))
+                    #self.labelList.insertItem(i+len_diff, next_item)
+
+        for index, (it, sh) in enumerate(self.keepLabelList.itemsToShapes):
+            if index >= len_diff:
+                break
+            self.keepLabelList.takeItem(self.keepLabelList.row(it))
+        self.keepLabelList.itemsToShapes = self.keepLabelList.itemsToShapes[len_diff:]
+
     def remLabels(self, shapes):
         for shape in shapes:
             item = self.labelList.get_item_from_shape(shape)
+            keep_item = self.keepLabelList.get_item_from_shape(shape)
             self.labelList.takeItem(self.labelList.row(item))
-            self.keepLabelList.takeItem(self.keepLabelList.row(item))
+            self.keepLabelList.takeItem(self.keepLabelList.row(keep_item))
     
     def remShapes(self, shapes):
         for shape in shapes:
             item = self.labelList.get_item_from_label(shape.label)
             self.labelList.takeItem(self.labelList.row(item))
 
-    def loadShapes(self, shapes, replace=True):
+    def loadShapes(self, shapes, replace=True, checked=False): # checked=True -> Only checked labels are in shapes to copy them
         self._noSelectionSlot = True
-        #print('=============================\n existing shapes', self.keepLabelList.itemsToShapes)
         for shape in shapes:
-            #print(' new shape', shape, shape.label)
             self.addLabel(shape)
-        #print('===============\n')
-        print(len(self.labelList.itemsToShapes), len(self.keepLabelList.itemsToShapes), len(self.uniqLabelList))
+        self.addKeepLabels()
         self.labelList.clearSelection()
         self.keepLabelList.clearSelection()
         self._noSelectionSlot = False
@@ -1195,10 +1242,6 @@ class MainWindow(QtWidgets.QMainWindow):
             # TODO
             pass
             #self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
-        
-        #print(self.canvas.visible)
-        #for (item, shape) in self.keepLabelList.itemsToShapes:
-        #    print('shape ', shape.label, shape._closed)
 
     # Callback functions:
 
@@ -1374,21 +1417,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._config['keep_prev'] and not self.labelList.shapes:
             self.loadShapes(prev_shapes, replace=False)
 
-        # load all shapes which are checked by the keepLabelList
-        (allItems, allShapes) = zip(*self.keepLabelList.itemsToShapes)
-        addedShapes = []
-        for i in range(len(allItems)):
-            #print('item ', allItems[i].text(), ' is visible', allItems[i].checkState())
-            if allItems[i].checkState() == Qt.Checked:
-                addedShapes.append(allShapes[i])
-
         self.setClean()
         self.canvas.setEnabled(True)
         self.adjustScale(initial=True)
 
-        #self.remShapes(addedShapes)
-        self.loadShapes(addedShapes, replace=False)
-        
         self.paintCanvas()
         self.addRecentFile(self.filename)
         self.toggleActions(True)
@@ -1453,7 +1485,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def openPrevImg(self, _value=False):
         keep_prev = self._config['keep_prev']
-        #print('labellist', self.keepLabelList.itemsToShapes, self.keepLabelList.__dict__)
         if QtGui.QGuiApplication.keyboardModifiers() == \
                 (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
             self._config['keep_prev'] = True
@@ -1660,6 +1691,9 @@ class MainWindow(QtWidgets.QMainWindow):
         return osp.exists(label_file)
 
     def mayContinue(self):
+        if self.keep_change:
+            self.setDirty()
+        self.keep_change = False
         if not self.dirty:
             return True
         mb = QtWidgets.QMessageBox
@@ -1675,6 +1709,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.saveFile()
             return True
         else:  # answer == mb.Cancel
+            self.keep_change = True
             return False
 
     def errorMessage(self, title, message):
