@@ -23,6 +23,11 @@ label_dock:
   closable: true
   movable: true
   floatable: true
+keep_dock:
+  show: true
+  closable: true
+  movable: true
+  floatable: true
 shape_dock:
   show: true
   closable: true
@@ -74,7 +79,7 @@ shortcuts:
   undo: Ctrl+Z
   undo_last_point: [Ctrl+Z, Backspace]
   add_point_to_edge: Ctrl+Shift+P
-  delete_point: Ctrl+Delete
+  delete_point: Ctrl+Backspace
   edit_label: Ctrl+E
   edit_line_color: Ctrl+L
   edit_fill_color: Ctrl+Shift+L

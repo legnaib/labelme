@@ -84,7 +84,6 @@ class MainWindow(QtWidgets.QMainWindow):
             flags=self._config['label_flags']
         )
 
-        self.labelList = LabelQListWidget()
         self.lastOpenDir = None
 
         self.flag_dock = self.flag_widget = None
@@ -96,6 +95,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.flag_dock.setWidget(self.flag_widget)
         self.flag_widget.itemChanged.connect(self.setDirty)
 
+        # activation for keeping this object unchanged
+        self.keepLabelList = LabelQListWidget()
+        self.keepLabelList.itemActivated.connect(self.labelSelectionChanged)
+        self.keepLabelList.itemSelectionChanged.connect(self.labelSelectionChanged)
+        self.keepLabelList.itemDoubleClicked.connect(self.editLabel)
+        # Connect to itemChanged to detect checkbox changes.
+        self.keepLabelList.itemChanged.connect(self.keepLabelItemChanged)
+        self.keepLabelList.setDragDropMode(
+            QtWidgets.QAbstractItemView.InternalMove)
+        self.keepLabelList.setParent(self)
+
+        self.keep_dock = QtWidgets.QDockWidget('Keep Labels', self)
+        self.keep_dock.setObjectName('Labels')
+        self.keep_dock.setWidget(self.keepLabelList)
+
+        # polygon labels
+        self.labelList = LabelQListWidget()
         self.labelList.itemActivated.connect(self.labelSelectionChanged)
         self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
         self.labelList.itemDoubleClicked.connect(self.editLabel)
@@ -104,6 +120,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.setDragDropMode(
             QtWidgets.QAbstractItemView.InternalMove)
         self.labelList.setParent(self)
+
         self.shape_dock = QtWidgets.QDockWidget('Polygon Labels', self)
         self.shape_dock.setObjectName('Labels')
         self.shape_dock.setWidget(self.labelList)
@@ -143,6 +160,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas = self.labelList.canvas = Canvas(
             epsilon=self._config['epsilon'],
         )
+        self.canvas = self.keepLabelList.canvas = Canvas(
+            epsilon=self._config['epsilon']
+        )
         self.canvas.zoomRequest.connect(self.zoomRequest)
 
         scrollArea = QtWidgets.QScrollArea()
@@ -162,7 +182,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setCentralWidget(scrollArea)
 
         features = QtWidgets.QDockWidget.DockWidgetFeatures()
-        for dock in ['flag_dock', 'label_dock', 'shape_dock', 'file_dock']:
+        for dock in ['flag_dock', 'label_dock', 'keep_dock', 'shape_dock', 'file_dock']:
             if self._config[dock]['closable']:
                 features = features | QtWidgets.QDockWidget.DockWidgetClosable
             if self._config[dock]['floatable']:
@@ -175,6 +195,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.addDockWidget(Qt.RightDockWidgetArea, self.flag_dock)
         self.addDockWidget(Qt.RightDockWidgetArea, self.label_dock)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.keep_dock)
         self.addDockWidget(Qt.RightDockWidgetArea, self.shape_dock)
         self.addDockWidget(Qt.RightDockWidgetArea, self.file_dock)
 
@@ -316,7 +337,7 @@ class MainWindow(QtWidgets.QMainWindow):
                                'Undo last drawn point', enabled=False)
         addPointToEdge = action(
             'Add Point to Edge',
-            self.canvas.addPointToEdge,
+            self.addPointToEdge,
             shortcuts['add_point_to_edge'],
             'edit',
             'Add point to the nearest edge',
@@ -325,7 +346,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         deletePoint = action(
             'Delete Point',
-            self.canvas.deletePoint,
+            self.deletePoint,
             shortcuts['delete_point'],
             'cancel',
             'Delete nearest point',
@@ -422,6 +443,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.customContextMenuRequested.connect(
             self.popLabelListMenu)
 
+        self.keepLabelList.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.keepLabelList.customContextMenuRequested.connect(
+            self.popLabelListMenu)
+
         # Store actions for further handling.
         self.actions = utils.struct(
             saveAuto=saveAuto,
@@ -500,7 +525,7 @@ class MainWindow(QtWidgets.QMainWindow):
             #self.actions.deletePoint.setEnabled
         )
 
-        self.canvas.edgeSelected.connect(
+        self.canvas.pointSelected.connect(
             self.actions.deletePoint.setEnabled,
         )
 
@@ -537,6 +562,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (
                 self.flag_dock.toggleViewAction(),
                 self.label_dock.toggleViewAction(),
+                self.keep_dock.toggleViewAction(),
                 self.shape_dock.toggleViewAction(),
                 self.file_dock.toggleViewAction(),
                 None,
@@ -747,6 +773,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def resetState(self):
         self.labelList.clear()
+        #self.keepLabelList.clear()
         self.filename = None
         self.imagePath = None
         self.imageData = None
@@ -772,6 +799,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def undoShapeEdit(self):
         self.canvas.restoreShape()
         self.labelList.clear()
+        self.keepLabelList.clear()
         self.loadShapes(self.canvas.shapes)
         self.actions.undo.setEnabled(self.canvas.isShapeRestorable)
 
@@ -867,6 +895,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def popLabelListMenu(self, point):
         self.menus.labelList.exec_(self.labelList.mapToGlobal(point))
+        self.menus.keepLabelList.exec_(self.keepLabelList.mapToGlobal(point))
 
     def validateLabel(self, label):
         # no validation
@@ -941,6 +970,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for shape in self.canvas.selectedShapes:
             shape.selected = False
         self.labelList.clearSelection()
+        self.keepLabelList.clearSelection()
         self.canvas.selectedShapes = selected_shapes
         for shape in self.canvas.selectedShapes:
             shape.selected = True
@@ -958,8 +988,49 @@ class MainWindow(QtWidgets.QMainWindow):
         item = QtWidgets.QListWidgetItem(shape.label)
         item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
         item.setCheckState(Qt.Checked)
-        self.labelList.itemsToShapes.append((item, shape))
-        self.labelList.addItem(item)
+
+        next_item = QtWidgets.QListWidgetItem(shape.label)
+        next_item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        next_item.setCheckState(Qt.Unchecked)
+
+        # if the shape already exists exactly -> don't update
+        # if the same label but a different shape already exist, replace them!
+        same_shape_exists = False
+        if len(self.keepLabelList.itemsToShapes) > 0:
+            (allItems, allShapes) = zip(*self.keepLabelList.itemsToShapes)
+            for i in range(len(allShapes)):
+                old_shape = allShapes[i]
+                if old_shape.label == shape.label:
+                    # old and new shape have the same label
+                    same_shape_exists = True
+                    if old_shape.points != shape.points:
+                        if allItems[i].checkState() == Qt.Unchecked:# and allItems[i].checkState() == Qt.Unchecked:
+                            self.keepLabelList.itemsToShapes[i] = (allItems[i], shape)
+                            
+                            # add shape correctly
+                            self.labelList.itemsToShapes.append((item, shape))
+                            self.labelList.addItem(item)
+                        else:
+                            # don't add any shape to labelList, only change labels
+                            self.remShapes([old_shape])
+                        print('points are not the same', shape.label)
+                        print('old_shape:', len(old_shape.points), 'new:', len(shape.points))
+                    else:
+                        self.labelList.itemsToShapes.append((item, shape))
+                        self.labelList.addItem(item)
+                        #new_item_shapes = (allItems[i], shape)
+                        #self.keepLabelList.itemsToShapes[i] = new_item_shapes
+            
+        if not same_shape_exists or len(self.keepLabelList.itemsToShapes) == 0:
+            # add items only if they are not there before
+            self.setDirty()
+            print('appended ', next_item.text())
+            
+            self.labelList.itemsToShapes.append((item, shape))
+            self.labelList.addItem(item)
+
+            self.keepLabelList.itemsToShapes.append((next_item, shape))
+            self.keepLabelList.addItem(next_item)
         if not self.uniqLabelList.findItems(shape.label, Qt.MatchExactly):
             self.uniqLabelList.addItem(shape.label)
             self.uniqLabelList.sortItems()
@@ -971,12 +1042,23 @@ class MainWindow(QtWidgets.QMainWindow):
         for shape in shapes:
             item = self.labelList.get_item_from_shape(shape)
             self.labelList.takeItem(self.labelList.row(item))
+            self.keepLabelList.takeItem(self.keepLabelList.row(item))
+    
+    def remShapes(self, shapes):
+        for shape in shapes:
+            item = self.labelList.get_item_from_label(shape.label)
+            self.labelList.takeItem(self.labelList.row(item))
 
     def loadShapes(self, shapes, replace=True):
         self._noSelectionSlot = True
+        #print('=============================\n existing shapes', self.keepLabelList.itemsToShapes)
         for shape in shapes:
+            #print(' new shape', shape, shape.label)
             self.addLabel(shape)
+        #print('===============\n')
+        print(len(self.labelList.itemsToShapes), len(self.keepLabelList.itemsToShapes), len(self.uniqLabelList))
         self.labelList.clearSelection()
+        self.keepLabelList.clearSelection()
         self._noSelectionSlot = False
         self.canvas.loadShapes(shapes, replace=replace)
 
@@ -1072,6 +1154,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def copySelectedShape(self):
         added_shapes = self.canvas.copySelectedShapes()
         self.labelList.clearSelection()
+        self.keepLabelList.clearSelection()
         for shape in added_shapes:
             self.addLabel(shape)
         self.setDirty()
@@ -1095,6 +1178,27 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setDirty()
         else:  # User probably changed item visibility
             self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
+
+    def keepLabelItemChanged(self, item):
+        shape = self.keepLabelList.get_shape_from_item(item)
+        label = str(item.text())
+        if shape == False:
+            # items label is the same, but the polygon not
+            item = self.keepLabelList.get_item_from_label(label)
+            item.setCheckState(Qt.Checked)
+            shape = self.keepLabelList.get_shape_from_item(item)
+        
+        if label != shape.label:
+            shape.label = label
+            self.setDirty()
+        else:  # User probably changed keeping this item
+            # TODO
+            pass
+            #self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
+        
+        #print(self.canvas.visible)
+        #for (item, shape) in self.keepLabelList.itemsToShapes:
+        #    print('shape ', shape.label, shape._closed)
 
     # Callback functions:
 
@@ -1131,6 +1235,7 @@ class MainWindow(QtWidgets.QMainWindow):
             text = ''
         if text:
             self.labelList.clearSelection()
+            self.keepLabelList.clearSelection()
             self.addLabel(self.canvas.setLastLabel(text, flags))
             self.actions.editMode.setEnabled(True)
             self.actions.undoLastPoint.setEnabled(False)
@@ -1187,6 +1292,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def togglePolygons(self, value):
         for item, shape in self.labelList.itemsToShapes:
+            item.setCheckState(Qt.Checked if value else Qt.Unchecked)
+        for item, shape in self.keepLabelList.itemsToShapes:
             item.setCheckState(Qt.Checked if value else Qt.Unchecked)
 
     def loadFile(self, filename=None):
@@ -1266,9 +1373,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.loadFlags(self.labelFile.flags)
         if self._config['keep_prev'] and not self.labelList.shapes:
             self.loadShapes(prev_shapes, replace=False)
+
+        # load all shapes which are checked by the keepLabelList
+        (allItems, allShapes) = zip(*self.keepLabelList.itemsToShapes)
+        addedShapes = []
+        for i in range(len(allItems)):
+            #print('item ', allItems[i].text(), ' is visible', allItems[i].checkState())
+            if allItems[i].checkState() == Qt.Checked:
+                addedShapes.append(allShapes[i])
+
         self.setClean()
         self.canvas.setEnabled(True)
         self.adjustScale(initial=True)
+
+        #self.remShapes(addedShapes)
+        self.loadShapes(addedShapes, replace=False)
+        
         self.paintCanvas()
         self.addRecentFile(self.filename)
         self.toggleActions(True)
@@ -1284,6 +1404,9 @@ class MainWindow(QtWidgets.QMainWindow):
     def paintCanvas(self):
         assert not self.image.isNull(), "cannot paint null image"
         self.canvas.scale = 0.01 * self.zoomWidget.value()
+        if len(self.labelList.itemsToShapes) != 0:
+            (item, shapes) = zip(*self.labelList.itemsToShapes)
+            self.canvas.loadShapes(shapes)
         self.canvas.adjustSize()
         self.canvas.update()
 
@@ -1330,6 +1453,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def openPrevImg(self, _value=False):
         keep_prev = self._config['keep_prev']
+        #print('labellist', self.keepLabelList.itemsToShapes, self.keepLabelList.__dict__)
         if QtGui.QGuiApplication.keyboardModifiers() == \
                 (QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier):
             self._config['keep_prev'] = True
@@ -1615,12 +1739,21 @@ class MainWindow(QtWidgets.QMainWindow):
     def copyShape(self):
         self.canvas.endMove(copy=True)
         self.labelList.clearSelection()
+        self.keepLabelList.clearSelection()
         for shape in self.canvas.selectedShapes:
             self.addLabel(shape)
         self.setDirty()
 
     def moveShape(self):
         self.canvas.endMove(copy=False)
+        self.setDirty()
+
+    def addPointToEdge(self):
+        self.canvas.addPointToEdge()
+        self.setDirty()
+
+    def deletePoint(self):
+        self.canvas.deletePoint()
         self.setDirty()
 
     def openDirDialog(self, _value=False, dirpath=None):

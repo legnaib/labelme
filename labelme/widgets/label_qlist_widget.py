@@ -13,11 +13,22 @@ class LabelQListWidget(QtWidgets.QListWidget):
         for index, (item_, shape) in enumerate(self.itemsToShapes):
             if item_ is item:
                 return shape
+        return False
 
     def get_item_from_shape(self, shape):
         for index, (item, shape_) in enumerate(self.itemsToShapes):
             if shape_ is shape:
                 return item
+
+    def get_item_from_label(self, label):
+        for index, (item, shape_) in enumerate(self.itemsToShapes):
+            if item.text() == label:
+                return item
+
+    def get_item_shape_from_label(self, label):
+        item = self.get_item_from_label(label)
+        shape = self.get_shape_from_item(item)
+        return (item, shape)
 
     def clear(self):
         super(LabelQListWidget, self).clear()
