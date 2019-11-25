@@ -100,9 +100,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # activation for keeping this object unchanged
         self.keepLabelList = LabelQListWidget()
-        self.keepLabelList.itemActivated.connect(self.labelSelectionChanged)
-        self.keepLabelList.itemSelectionChanged.connect(self.labelSelectionChanged)
-        self.keepLabelList.itemDoubleClicked.connect(self.editLabel)
+        self.keepLabelList.itemActivated.connect(self.keepLabelSelectionChanged)
+        self.keepLabelList.itemSelectionChanged.connect(self.keepLabelSelectionChanged)
+        #self.keepLabelList.itemDoubleClicked.connect(self.editLabel)
         # Connect to itemChanged to detect checkbox changes.
         self.keepLabelList.itemChanged.connect(self.keepLabelItemChanged)
         self.keepLabelList.setDragDropMode(
@@ -1062,7 +1062,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 next_item = QtWidgets.QListWidgetItem(new_item.text())
                 next_item.setFlags(next_item.flags() | Qt.ItemIsUserCheckable)
                 next_item.setCheckState(Qt.Checked)
-                self.keepLabelList.itemsToShapes.insert(i+len_diff, (next_item, new_shape))
+                self.keepLabelList.takeItem(i+len_diff)
+                self.keepLabelList.itemsToShapes[i+len_diff] = (next_item, new_shape)
                 self.keepLabelList.insertItem(i+len_diff, next_item)
 
                 # add to labelList
@@ -1071,15 +1072,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 if orig_shape == None:
                     self.keep_change = True
-                    print('inserted something')
                     next_item = QtWidgets.QListWidgetItem(new_shape.label)
                     next_item.setFlags(next_item.flags() | Qt.ItemIsUserCheckable)
                     next_item.setCheckState(Qt.Checked)
                     self.labelList.itemsToShapes[i] = (next_item, new_shape)
                     self.labelList.takeItem(i)
                     self.labelList.insertItem(i, next_item)
-                    #self.labelList.itemsToShapes.insert(i+len_diff, (next_item, new_shape))
-                    #self.labelList.insertItem(i+len_diff, next_item)
 
         for index, (it, sh) in enumerate(self.keepLabelList.itemsToShapes):
             if index >= len_diff:
@@ -1213,6 +1211,17 @@ class MainWindow(QtWidgets.QMainWindow):
             selected_shapes = []
             for item in self.labelList.selectedItems():
                 shape = self.labelList.get_shape_from_item(item)
+                selected_shapes.append(shape)
+            if selected_shapes:
+                self.canvas.selectShapes(selected_shapes)
+
+    def keepLabelSelectionChanged(self):
+        if self._noSelectionSlot:
+            return
+        if self.canvas.editing():
+            selected_shapes = []
+            for item in self.keepLabelList.selectedItems():
+                shape = self.keepLabelList.get_shape_from_item(item)
                 selected_shapes.append(shape)
             if selected_shapes:
                 self.canvas.selectShapes(selected_shapes)
